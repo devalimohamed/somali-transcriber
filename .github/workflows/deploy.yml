@@ -1,0 +1,37 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        required: true
+        options:
+          - dev
+          - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${KUBECONFIG_B64}" | base64 -d > ~/.kube/config
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
+
+      - name: Deploy kustomize overlay
+        run: |
+          kubectl apply -k infra/k8s/overlays/${{ inputs.environment }}
+          kubectl -n default set image deployment/somtranscriber-backend \
+            backend=ghcr.io/${{ github.repository_owner }}/somtranscriber-backend:${{ github.sha }}
+          kubectl -n default rollout status deployment/somtranscriber-backend --timeout=180s
