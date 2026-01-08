@@ -1,0 +1,76 @@
+spring:
+  application:
+    name: somtranscriber-backend
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/somtranscriber}
+    username: ${DB_USERNAME:somtranscriber}
+    password: ${DB_PASSWORD:somtranscriber}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  servlet:
+    multipart:
+      max-file-size: 16MB
+      max-request-size: 16MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  tracing:
+    sampling:
+      probability: 1.0
+
+app:
+  jwt:
+    issuer: somtranscriber
+    access-ttl-minutes: 15
+    refresh-ttl-days: 30
+    secret: ${JWT_SECRET:change-me-change-me-change-me-change-me}
+  audio:
+    storage-dir: ${AUDIO_STORAGE_DIR:/tmp/somtranscriber/audio}
+    max-duration-seconds: 120
+  openai:
+    api-key: ${OPENAI_API_KEY:}
+    model: ${OPENAI_TRANSCRIBE_MODEL:gpt-4o-transcribe}
+    translation-model: ${OPENAI_TRANSLATION_MODEL:gpt-4o-mini}
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+  ollama:
+    base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+    model: ${OLLAMA_MODEL:qwen2.5:3b}
+  retry:
+    queue-key: ${RETRY_QUEUE_KEY:call-retry-jobs}
+    max-attempts: ${RETRY_MAX_ATTEMPTS:3}
+    async-on-upload: ${RETRY_ASYNC_ON_UPLOAD:true}
+    worker:
+      enabled: ${RETRY_WORKER_ENABLED:true}
+      delay-ms: ${RETRY_WORKER_DELAY_MS:2000}
+  cors:
+    allowed-origin-patterns:
+      - ${CORS_ALLOWED_ORIGIN_1:http://localhost:19006}
+      - ${CORS_ALLOWED_ORIGIN_2:http://localhost:8081}
+      - ${CORS_ALLOWED_ORIGIN_3:http://localhost:8080}
+      - ${CORS_ALLOWED_ORIGIN_4:http://127.0.0.1:19006}
+      - ${CORS_ALLOWED_ORIGIN_5:http://127.0.0.1:8081}
+      - ${CORS_ALLOWED_ORIGIN_6:http://127.0.0.1:8080}
+
+logging:
+  level:
+    com.somtranscriber: INFO

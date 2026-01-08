@@ -1,0 +1,2 @@
+ALTER TABLE call_records
+DROP COLUMN IF EXISTS place;
