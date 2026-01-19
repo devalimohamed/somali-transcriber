@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: somtranscriber-backend-config
+  labels:
+    app: somtranscriber-backend
+data:
+  DB_URL: jdbc:postgresql://somtranscriber-postgres:5432/somtranscriber
+  DB_USERNAME: somtranscriber
+  REDIS_HOST: somtranscriber-redis
+  REDIS_PORT: "6379"
+  OLLAMA_BASE_URL: http://somtranscriber-ollama:11434
+  OPENAI_BASE_URL: https://api.openai.com
+  OPENAI_TRANSCRIBE_MODEL: gpt-4o-transcribe
+  OLLAMA_MODEL: qwen2.5:3b
+  AUDIO_STORAGE_DIR: /tmp/somtranscriber/audio

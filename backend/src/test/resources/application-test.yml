@@ -1,0 +1,45 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: sa
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  flyway:
+    enabled: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  task:
+    scheduling:
+      enabled: false
+
+app:
+  jwt:
+    issuer: somtranscriber-test
+    access-ttl-minutes: 15
+    refresh-ttl-days: 30
+    secret: test-secret-test-secret-test-secret
+  audio:
+    storage-dir: /tmp/somtranscriber-test/audio
+    max-duration-seconds: 120
+  openai:
+    api-key:
+    model: gpt-4o-transcribe
+    translation-model: gpt-4o-mini
+    base-url: https://api.openai.com
+  ollama:
+    base-url:
+    model: qwen2.5:3b
+  retry:
+    queue-key: call-retry-jobs-test
+    max-attempts: 3
+    async-on-upload: false
+    worker:
+      enabled: false
+  cors:
+    allowed-origin-patterns:
+      - http://localhost

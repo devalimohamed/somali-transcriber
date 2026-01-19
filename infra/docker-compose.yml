@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: somtranscriber
+      POSTGRES_USER: somtranscriber
+      POSTGRES_PASSWORD: somtranscriber
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+
+  backend:
+    build:
+      context: ../backend
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/somtranscriber
+      DB_USERNAME: somtranscriber
+      DB_PASSWORD: somtranscriber
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OLLAMA_BASE_URL: http://ollama:11434
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com}
+      OPENAI_TRANSCRIBE_MODEL: ${OPENAI_TRANSCRIBE_MODEL:-gpt-4o-transcribe}
+      OPENAI_TRANSLATION_MODEL: ${OPENAI_TRANSLATION_MODEL:-gpt-4o-mini}
+      JWT_SECRET: ${JWT_SECRET:-change-me-change-me-change-me-change-me}
+      BOOTSTRAP_USERNAME: ${BOOTSTRAP_USERNAME:-test}
+      BOOTSTRAP_PIN: ${BOOTSTRAP_PIN:-123456}
+    depends_on:
+      - postgres
+      - redis
+      - ollama
+    ports:
+      - "${BACKEND_PORT:-18080}:8080"
+
+volumes:
+  pg_data:
+  ollama_data:
