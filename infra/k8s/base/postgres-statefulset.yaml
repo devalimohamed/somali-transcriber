@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: somtranscriber-postgres
+  labels:
+    app: somtranscriber-postgres
+spec:
+  serviceName: somtranscriber-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: somtranscriber-postgres
+  template:
+    metadata:
+      labels:
+        app: somtranscriber-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: somtranscriber
+            - name: POSTGRES_USER
+              value: somtranscriber
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: somtranscriber-backend-secret
+                  key: DB_PASSWORD
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "800m"
+              memory: "1024Mi"
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

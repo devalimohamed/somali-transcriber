@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: somtranscriber-redis
+  labels:
+    app: somtranscriber-redis
+spec:
+  selector:
+    app: somtranscriber-redis
+  ports:
+    - port: 6379
+      targetPort: 6379

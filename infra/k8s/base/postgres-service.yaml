@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: somtranscriber-postgres
+  labels:
+    app: somtranscriber-postgres
+spec:
+  selector:
+    app: somtranscriber-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
