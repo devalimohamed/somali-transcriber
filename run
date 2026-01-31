@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+INFRA_DIR="$ROOT_DIR/infra"
+MOBILE_DIR="$ROOT_DIR/mobile"
+ENV_FILE="$ROOT_DIR/.env"
+LEGACY_ENV_FILE="$INFRA_DIR/.env"
+MODEL_NAME="${OLLAMA_MODEL:-qwen2.5:3b}"
+PROJECT_NAME="somtranscriber"
+
+print_usage() {
+  cat <<USAGE
+Usage: ./run [--no-mobile] [--skip-model-pull] [--device] [--backend-port PORT] [--help]
+
+Options:
+  --no-mobile        Start backend stack only (skip Expo mobile app)
+  --skip-model-pull  Do not pull/update the Ollama model
+  --device           Use LAN IP so a physical iOS/Android device can reach the backend
+  --backend-port     Host port for backend API (container always uses 8080)
+  --help             Show this help message
+USAGE
+}
+
+NO_MOBILE=false
+SKIP_MODEL_PULL=false
+DEVICE_MODE=false
+BACKEND_PORT_ARG=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-mobile)
+      NO_MOBILE=true
+      shift
+      ;;
+    --skip-model-pull)
+      SKIP_MODEL_PULL=true
+      shift
+      ;;
+    --device)
+      DEVICE_MODE=true
+      shift
+      ;;
+    --backend-port)
+      if [[ $# -lt 2 ]]; then
+        echo "--backend-port requires a value"
+        exit 1
+      fi
+      BACKEND_PORT_ARG="$2"
+      shift 2
+      ;;
+    --help|-h)
+      print_usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      print_usage
+      exit 1
+      ;;
+  esac
+done
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1"
+    exit 1
+  fi
+}
+
+require_cmd docker
+require_cmd npm
+require_cmd curl
+require_cmd node
+
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is not running. Start Docker Desktop and rerun ./run"
+  exit 1
+fi
+
+if [[ ! -f "$ENV_FILE" && -f "$LEGACY_ENV_FILE" ]]; then
+  cp "$LEGACY_ENV_FILE" "$ENV_FILE"
+  echo "Copied legacy env file from $LEGACY_ENV_FILE to $ENV_FILE"
+fi
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  cat > "$ENV_FILE" <<ENVFILE
+OPENAI_API_KEY=
+OPENAI_BASE_URL=https://api.openai.com
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
+OPENAI_TRANSLATION_MODEL=gpt-4o-mini
+JWT_SECRET=change-me-change-me-change-me-change-me
+BOOTSTRAP_USERNAME=test
+BOOTSTRAP_PIN=123456
+ENVFILE
+  echo "Created $ENV_FILE template. Set OPENAI_API_KEY and JWT_SECRET, then re-run ./run"
+  exit 1
+fi
+
+dc() {
+  docker compose -p "$PROJECT_NAME" --env-file "$ENV_FILE" -f "$INFRA_DIR/docker-compose.yml" "$@"
+}
+
+is_port_in_use() {
+  local port="$1"
+  lsof -iTCP:"$port" -sTCP:LISTEN -n -P >/dev/null 2>&1
+}
+
+pick_backend_port() {
+  local preferred="${BACKEND_PORT_ARG:-${BACKEND_PORT:-}}"
+  local existing=""
+
+  existing="$(dc port backend 8080 2>/dev/null | tail -n1 | awk -F: '{print $NF}' || true)"
+
+  if [[ -n "$preferred" ]]; then
+    if is_port_in_use "$preferred" && [[ -z "$existing" || "$existing" != "$preferred" ]]; then
+      echo "Selected backend port $preferred is already in use. Choose another with --backend-port"
+      exit 1
+    fi
+    echo "$preferred"
+    return
+  fi
+
+  if [[ -n "$existing" ]]; then
+    echo "$existing"
+    return
+  fi
+
+  for candidate in 18080 8080 28080 38080 48080; do
+    if ! is_port_in_use "$candidate"; then
+      echo "$candidate"
+      return
+    fi
+  done
+
+  echo "Could not find a free backend port"
+  exit 1
+}
+
+detect_lan_ip() {
+  local ip
+  ip="$(ipconfig getifaddr en0 2>/dev/null || true)"
+  if [[ -z "$ip" ]]; then
+    ip="$(ipconfig getifaddr en1 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$ip" ]]; then
+    local iface
+    iface="$(route get default 2>/dev/null | awk '/interface:/{print $2}' || true)"
+    if [[ -n "$iface" ]]; then
+      ip="$(ipconfig getifaddr "$iface" 2>/dev/null || true)"
+    fi
+  fi
+
+  echo "$ip"
+}
+
+mobile_deps_ready() {
+  if [[ ! -d "$MOBILE_DIR/node_modules" ]]; then
+    return 1
+  fi
+
+  (
+    cd "$MOBILE_DIR"
+    node -e "require.resolve('expo/package.json');require.resolve('babel-preset-expo/package.json');require.resolve('react/package.json');require.resolve('react-native/package.json');"
+  ) >/dev/null 2>&1
+}
+
+BACKEND_PORT_VALUE="$(pick_backend_port)"
+export BACKEND_PORT="$BACKEND_PORT_VALUE"
+
+echo "Starting backend stack with Docker Compose (API host port: $BACKEND_PORT)..."
+(
+  cd "$INFRA_DIR"
+  dc up --build -d
+)
+
+BACKEND_HEALTH_URL="http://localhost:$BACKEND_PORT/actuator/health"
+ready=false
+for _ in {1..40}; do
+  if curl -fsS "$BACKEND_HEALTH_URL" >/dev/null 2>&1; then
+    ready=true
+    break
+  fi
+  sleep 2
+done
+
+if [[ "$ready" != "true" ]]; then
+  echo "Backend did not become healthy in time. Recent backend logs:"
+  (
+    cd "$INFRA_DIR"
+    dc logs --tail=100 backend || true
+  )
+  exit 1
+fi
+
+if [[ "$SKIP_MODEL_PULL" == "false" ]]; then
+  echo "Waiting for Ollama service to become ready..."
+  ollama_ready=false
+  for _ in {1..30}; do
+    if (
+      cd "$INFRA_DIR"
+      dc exec -T ollama ollama list >/dev/null 2>&1
+    ); then
+      ollama_ready=true
+      break
+    fi
+    sleep 2
+  done
+
+  if [[ "$ollama_ready" == "true" ]]; then
+    echo "Ensuring Ollama model '$MODEL_NAME' is present..."
+    (
+      cd "$INFRA_DIR"
+      dc exec -T ollama ollama pull "$MODEL_NAME"
+    )
+  else
+    echo "Warning: Ollama did not become ready in time; skipping model pull"
+  fi
+fi
+
+if [[ "$NO_MOBILE" == "true" ]]; then
+  echo "Backend stack is up. API URL: http://localhost:$BACKEND_PORT"
+  exit 0
+fi
+
+if ! mobile_deps_ready; then
+  echo "Installing/updating mobile dependencies..."
+  (
+    cd "$MOBILE_DIR"
+    npm install
+  )
+fi
+
+API_BASE_URL="${EXPO_PUBLIC_API_BASE_URL:-}"
+EXPO_HOST_FLAG=""
+if [[ -z "$API_BASE_URL" ]]; then
+  if [[ "$DEVICE_MODE" == "true" ]]; then
+    LAN_IP="$(detect_lan_ip)"
+    if [[ -n "$LAN_IP" ]]; then
+      API_BASE_URL="http://$LAN_IP:$BACKEND_PORT"
+      EXPO_HOST_FLAG="--lan"
+    else
+      API_BASE_URL="http://localhost:$BACKEND_PORT"
+      echo "Warning: Could not detect LAN IP; falling back to localhost"
+    fi
+  else
+    API_BASE_URL="http://localhost:$BACKEND_PORT"
+  fi
+fi
+
+export EXPO_PUBLIC_API_BASE_URL="$API_BASE_URL"
+
+echo "Backend ready: $BACKEND_HEALTH_URL"
+echo "Mobile API base URL: $EXPO_PUBLIC_API_BASE_URL"
+if [[ "$DEVICE_MODE" == "true" ]]; then
+  echo "Device mode enabled. Ensure phone and Mac are on the same Wi-Fi network."
+fi
+
+(
+  cd "$MOBILE_DIR"
+  if [[ -n "$EXPO_HOST_FLAG" ]]; then
+    npm start -- "$EXPO_HOST_FLAG"
+  else
+    npm start
+  fi
+)
